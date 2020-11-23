@@ -1,0 +1,52 @@
+---
+title: "NYC Yellow Taxi Dataset for June 2020"
+output: html_notebook
+---
+```{r}
+library(tidyverse)
+```
+
+```{r}
+#Import the dataset
+june2020 <- read.csv('https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2020-06.csv')
+```
+```{r}
+attach(june2020)
+dim(june2020)
+```
+```{r}
+problems(june2020)
+```
+```{r}
+june2020$tpep_pickup_datetime <- ymd_hms(june2020$tpep_pickup_datetime)
+june2020$tpep_dropoff_datetime <- ymd_hms(june2020$tpep_dropoff_datetime)
+```
+
+```{r}
+na_count <-sapply(june2020, function(y) sum(length(which(is.na(y)))))
+na_count
+```
+```{r}
+june2020<-drop_na(june2020)
+```
+
+
+```{r}
+summary(june2020)
+```
+```{r}
+#Look for any null values
+head(june2020)
+```
+```{r}
+
+```
+
+---
+Exploratory Data Analysis
+---
+
+```{r}
+ggplot(data = june2020) + geom_bar(mapping = aes(x= passenger_count))
+```
+
