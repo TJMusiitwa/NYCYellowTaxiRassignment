@@ -3,13 +3,43 @@ title: "NYC Yellow Taxi Dataset for June 2020"
 output: html_notebook
 ---
 ```{r}
+library(plyr)
 library(tidyverse)
+library(lubridate)
+library(plotly)
+```
+
+### Data Extraction, Transformation & Loading
+```{r Import Dataset}
+#Import the dataset, random select 50,000 rows
+original <- read.csv('https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2020-06.csv')
 ```
 
 ```{r}
-#Import the dataset
-june2020 <- read.csv('https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2020-06.csv')
+original<-drop_na(original)
 ```
+
+```{r}
+unique(original$RatecodeID)
+```
+
+```{r}
+original <- subset.data.frame(original, original$RatecodeID != 99, drop = TRUE)
+```
+
+```{r}
+set.seed(100518243)
+```
+
+```{r}
+index <- sample(1:nrow(original),50000)
+```
+
+```{r}
+june2020 <- (original[index,])
+```
+
+
 ```{r}
 attach(june2020)
 dim(june2020)
@@ -17,36 +47,110 @@ dim(june2020)
 ```{r}
 problems(june2020)
 ```
+Transform the datetime columns from character to datetime data types 
 ```{r}
 june2020$tpep_pickup_datetime <- ymd_hms(june2020$tpep_pickup_datetime)
 june2020$tpep_dropoff_datetime <- ymd_hms(june2020$tpep_dropoff_datetime)
 ```
 
+Count the number of null value rows for each column
 ```{r}
-na_count <-sapply(june2020, function(y) sum(length(which(is.na(y)))))
-na_count
+sapply(june2020, function(y) sum(length(which(is.na(y)))))
+```
+
+Convert columns to categorical factors
+```{r}
+june2020$store_and_fwd_flag <- parse_factor(june2020$store_and_fwd_flag)
+june2020$payment_type <- factor(june2020$payment_type)
+june2020$VendorID <- factor(june2020$VendorID)
+june2020$RatecodeID <- factor(june2020$RatecodeID)
+```
+
+```{r}
+june2020$payment_type <- mapvalues(payment_type, from = c("1", "2", "3","4","5"), to = c("Credit Card", "Cash","No charge","Dispute","Unknown"))
 ```
 ```{r}
-june2020<-drop_na(june2020)
+june2020$VendorID <- mapvalues(VendorID, from = c("1", "2"), to = c("Creative Mobile Technologies", "VeriFone Inc"))
 ```
+
+```{r}
+june2020$RatecodeID <- mapvalues(payment_type, from = c("1", "2", "3","4","5"), to = c("Standard Rate", "JFK","Newark","Nassau or Westchester","Negotiated fare"))
+```
+
+```{r}
+june2020$pickup_day <- factor(day(tpep_pickup_datetime))
+june2020$pickup_month <- factor(month(tpep_pickup_datetime, label = TRUE))
+june2020$pickup_dayofweek <- factor(wday(tpep_pickup_datetime, label = TRUE))
+
+june2020$dropoff_day <- factor(day(tpep_dropoff_datetime))
+june2020$dropoff_month <- factor(month(tpep_dropoff_datetime, label = TRUE))
+june2020$dropoff_dayofweek <- factor(wday(tpep_dropoff_datetime, label = TRUE))
+```
+
+```{r}
+june2020$pickup_hour <- factor(hour(tpep_pickup_datetime))
+june2020$dropoff_hour <- factor(hour(tpep_dropoff_datetime))
+```
+
+
+```{r}
+str(june2020)
+```
+
 
 
 ```{r}
 summary(june2020)
 ```
+
 ```{r}
-#Look for any null values
+glimpse(june2020)
+```
+
+```{r}
 head(june2020)
 ```
-```{r}
 
+```{r Save processed dataset to csv}
+write.csv(june2020,"nyc_data.csv")
 ```
 
----
-Exploratory Data Analysis
----
+### Exploratory Data Analysis
 
 ```{r}
-ggplot(data = june2020) + geom_bar(mapping = aes(x= passenger_count))
+ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x= passenger_count, fill=passenger_count)))
+```
+```{r}
+ggplotly(ggplot(data = june2020) + 
+  geom_bar(mapping = aes(x = VendorID, fill=VendorID)))
+```
+```{r}
+ggplotly(ggplot(data = june2020) + 
+  geom_bar(mapping = aes(x = payment_type, fill=payment_type)))
+```
+
+```{r}
+ggplotly(ggplot(data = june2020) + 
+  geom_bar(mapping = aes(x = RatecodeID, fill=RatecodeID)))
+```
+
+```{r}
+par(mfrow=c(2,2))
+ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x=pickup_dayofweek, fill=pickup_dayofweek)) + ggtitle("Pick Up Days of the week"))
+
+ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x=dropoff_dayofweek, fill=dropoff_dayofweek)) + ggtitle("Drop Off Days of the week"))
+
+ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x=pickup_hour, fill=pickup_hour)) + ggtitle("Pick Up Hours of the week"))
+
+ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x=dropoff_hour, fill=dropoff_hour)) + ggtitle("Drop Off Hours of the week"))
+```
+
+```{r}
+ggplot(june2020, aes(x = pickup_dayofweek, y = total_amount)) +
+  geom_point()
+```
+
+```{r}
+ggplot(june2020, aes(x=trip_distance, y=total_amount))+geom_point()
 ```
 
