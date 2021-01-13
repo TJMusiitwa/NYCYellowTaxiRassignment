@@ -1,36 +1,124 @@
 ---
 title: "NYC Yellow Taxi Dataset for June 2020"
-output: html_notebook
+output: 
+  html_notebook:
+    toc: TRUE
+    toc_float: TRUE
+author: 100518243
 ---
-```{r}
+```{r Install packages, include=FALSE}
+install.packages("plyr")
+install.packages("tidyverse")
+install.packages("lubridate")
+install.packages("plotly")
+install.packages("caret")
+install.packages("tree")
+install.packages("e1071")
+```
+
+```{r Import packages, echo=TRUE, message=FALSE}
+#Import the packages
 library(plyr)
 library(tidyverse)
 library(lubridate)
 library(plotly)
+library(caret)
+library(e1071)
+library(tree)
 ```
 
-### Data Extraction, Transformation & Loading
+# Data Extraction, Transformation & Loading
 ```{r Import Dataset}
-#Import the dataset, random select 50,000 rows
-original <- read.csv('https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2020-06.csv')
+#Online Datasource
+#original <- read.csv('https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2020-06.csv')
+original <- read.csv("yellow_tripdata_2020-06.csv")
 ```
 
+### Data Cleaning
+Investigating the summary of the dataset, shows that there are quite a number of negative values in various instances of the columns which could be possible outliers and thus will cause errors in the data as further analysis proceeds.
+Therefore, we shall need to deal with these negative values and any other possible outliers.
 ```{r}
+summary(original)
+```
+Count all the null values
+```{r Count the number of null entries}
+sapply(original, function(y) sum(length(which(is.na(y)))))
+```
+
+Drop all the rows with null entries
+```{r Drop the null entries}
 original<-drop_na(original)
 ```
 
+Already investigating, we come across the fact that the max value in "Trip distance" is a quite huge, thus we have identified an outlier.
+```{r}
+head(sort(original$trip_distance, decreasing = T),10)
+```
+Thus we drop that value
+```{r}
+original <- subset.data.frame(original, original$trip_distance != 22543.99, drop = TRUE)
+```
+
+While looking through the dataset, we spot that the "RatecodeID" field has a value 99 that is not described in the data dictionary.
 ```{r}
 unique(original$RatecodeID)
 ```
 
 ```{r}
+print(paste("There are",sum(original$RatecodeID == 99),"rows with the value 99 in them"))
+```
+Therefore, we remove any rows that conform to this condition
+```{r}
 original <- subset.data.frame(original, original$RatecodeID != 99, drop = TRUE)
 ```
 
+The data dictionary describes a value known as "Unknown" payment type and as we do not have information as to how the passenger(s) paid for their trip, we drop it
+```{r}
+sum(original$payment_type == 5)
+```
+```{r}
+original <- subset.data.frame(original, original$payment_type != 5, drop = TRUE)
+```
+
+Passenger count shows that there are trips with 0 passengers as this is not feasible. As well as trips that had over 7 passengers. We shall remove the trips containing them.
+```{r}
+unique(original$passenger_count)
+```
+
+```{r}
+print(paste("There are",sum(original$passenger_count %in% c(0,7,8,9)),"rows with the value of 0,7,8 and 9 passengers in them"))
+```
+```{r Helper function to negate the In operator, include=FALSE}
+`%!in%` <- Negate(`%in%`)
+```
+
+```{r}
+original <- subset.data.frame(original, original$passenger_count %!in% c(0,7,8,9), drop = TRUE)
+```
+
+Dealing with negative values in the dataset
+```{r}
+print(paste("There are",length(original[original < 0]),"rows with negative values in them"))
+```
+
+We proceed to replace all the negative values with NA
+```{r}
+original <- replace(original,original < 0,NA)
+```
+And then drop the rows
+```{r}
+original <- drop_na(original)
+```
+
+```{r}
+summary(select_if(original, is.numeric))
+```
+For reproducibility we set the seed 
 ```{r}
 set.seed(100518243)
 ```
 
+We proceed to have a random selection of our data to narrow it down to 50,000 rows
 ```{r}
 index <- sample(1:nrow(original),50000)
 ```
@@ -39,23 +127,19 @@ index <- sample(1:nrow(original),50000)
 june2020 <- (original[index,])
 ```
 
-
 ```{r}
 attach(june2020)
+```
+
+```{r}
 dim(june2020)
 ```
-```{r}
-problems(june2020)
-```
+
+### We commence transformation
 Transform the datetime columns from character to datetime data types 
 ```{r}
 june2020$tpep_pickup_datetime <- ymd_hms(june2020$tpep_pickup_datetime)
 june2020$tpep_dropoff_datetime <- ymd_hms(june2020$tpep_dropoff_datetime)
-```
-
-Count the number of null value rows for each column
-```{r}
-sapply(june2020, function(y) sum(length(which(is.na(y)))))
 ```
 
 Convert columns to categorical factors
@@ -66,24 +150,27 @@ june2020$VendorID <- factor(june2020$VendorID)
 june2020$RatecodeID <- factor(june2020$RatecodeID)
 ```
 
+We assign terms to the categorical columns
 ```{r}
-june2020$payment_type <- mapvalues(payment_type, from = c("1", "2", "3","4","5"), to = c("Credit Card", "Cash","No charge","Dispute","Unknown"))
+june2020$payment_type <- mapvalues(payment_type, from = c("1", "2", "3","4"), to = c("Credit Card", "Cash","No charge","Dispute"))
 ```
+
 ```{r}
 june2020$VendorID <- mapvalues(VendorID, from = c("1", "2"), to = c("Creative Mobile Technologies", "VeriFone Inc"))
 ```
 
 ```{r}
-june2020$RatecodeID <- mapvalues(payment_type, from = c("1", "2", "3","4","5"), to = c("Standard Rate", "JFK","Newark","Nassau or Westchester","Negotiated fare"))
+#june2020$RatecodeID <- mapvalues(RatecodeID, from = c("1", "2", "3","4","5"), to = c("Standard Rate", "JFK","Newark","Nassau or Westchester","Negotiated fare"))
 ```
 
+We proceed to extract data relating to day,month and day of the week from the datetime columns
 ```{r}
 june2020$pickup_day <- factor(day(tpep_pickup_datetime))
-june2020$pickup_month <- factor(month(tpep_pickup_datetime, label = TRUE))
+
 june2020$pickup_dayofweek <- factor(wday(tpep_pickup_datetime, label = TRUE))
 
 june2020$dropoff_day <- factor(day(tpep_dropoff_datetime))
-june2020$dropoff_month <- factor(month(tpep_dropoff_datetime, label = TRUE))
+
 june2020$dropoff_dayofweek <- factor(wday(tpep_dropoff_datetime, label = TRUE))
 ```
 
@@ -92,50 +179,54 @@ june2020$pickup_hour <- factor(hour(tpep_pickup_datetime))
 june2020$dropoff_hour <- factor(hour(tpep_dropoff_datetime))
 ```
 
-
 ```{r}
-str(june2020)
+june2020$ride_duration <- as.numeric(june2020$tpep_dropoff_datetime-june2020$tpep_pickup_datetime)
 ```
-
-
 
 ```{r}
 summary(june2020)
 ```
-
-```{r}
-glimpse(june2020)
-```
-
 ```{r}
 head(june2020)
 ```
-
-```{r Save processed dataset to csv}
-write.csv(june2020,"nyc_data.csv")
+```{r}
+summary(june2020$ride_duration)
 ```
-
-### Exploratory Data Analysis
+The maximum duration for a ride is shown as 161250 seconds, which is nearly 44 hours as such we remove any rows whose duration exceed over 2 hours or 7200 seconds.
+```{r}
+june2020 <- subset.data.frame(june2020, june2020$ride_duration <= 7200, drop=TRUE)
+```
 
 ```{r}
-ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x= passenger_count, fill=passenger_count)))
+#After removing rides with longer than 2 hours
+summary(june2020$ride_duration)
 ```
+```{r}
+ggplotly(ggplot(june2020,aes(ride_duration))+
+geom_density(stat='count'))
+```
+# Exploratory Data Analysis
+
+```{r}
+ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x= passenger_count), fill="blue") + ylab("Trip count") + xlab("Passenger count") + ggtitle("A distribution of passenger count") )
+```
+
 ```{r}
 ggplotly(ggplot(data = june2020) + 
-  geom_bar(mapping = aes(x = VendorID, fill=VendorID)))
-```
-```{r}
-ggplotly(ggplot(data = june2020) + 
-  geom_bar(mapping = aes(x = payment_type, fill=payment_type)))
+  geom_bar(mapping = aes(x = VendorID),fill= c("orange", "red")) + ylab("Trip count"))
 ```
 
 ```{r}
 ggplotly(ggplot(data = june2020) + 
-  geom_bar(mapping = aes(x = RatecodeID, fill=RatecodeID)))
+  geom_bar(mapping = aes(x = payment_type, fill=payment_type))+ ylab("Trip count"))
 ```
 
 ```{r}
-par(mfrow=c(2,2))
+ggplotly(ggplot(data = june2020) + 
+  geom_bar(mapping = aes(x = RatecodeID, fill=RatecodeID)) + ylab("Trip count"), tooltip = c("y", "x")+ theme(axis.text.x = element_text(angle = 45)))
+```
+
+```{r paged.print=TRUE}
 ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x=pickup_dayofweek, fill=pickup_dayofweek)) + ggtitle("Pick Up Days of the week"))
 
 ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x=dropoff_dayofweek, fill=dropoff_dayofweek)) + ggtitle("Drop Off Days of the week"))
@@ -145,12 +236,214 @@ ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x=pickup_hour, fill=pi
 ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x=dropoff_hour, fill=dropoff_hour)) + ggtitle("Drop Off Hours of the week"))
 ```
 
+
 ```{r}
-ggplot(june2020, aes(x = pickup_dayofweek, y = total_amount)) +
-  geom_point()
+ggplotly(ggplot(data=june2020, aes(x=pickup_hour, fill=payment_type)) + geom_bar())
 ```
 
 ```{r}
-ggplot(june2020, aes(x=trip_distance, y=total_amount))+geom_point()
+ggplot(june2020, aes(x = pickup_hour, y = total_amount)) +
+  geom_boxplot() 
 ```
 
+```{r}
+ggplot(june2020,aes(trip_distance))+
+geom_density(stat='count')+
+xlim(0,30)+ylim(0,1000)
+```
+
+```{r}
+ggplot(june2020,aes(total_amount))+
+geom_density(stat='count')+
+xlim(0,150)
+```
+
+```{r}
+ggplot(june2020, aes(x=trip_distance, y=total_amount))+geom_point()+ geom_smooth(method = lm)
+```
+
+# Model Building
+
+For the purpose of supervised learning, we shall look to predict the total_amount taxi fare based on the set of predictors.
+In order to better predict the total values, we shall be eliminating the negative values
+
+First we shall split the data into training and test datasets
+```{r}
+trainRowIndex <- sample(1:nrow(june2020), 0.7*nrow(june2020))
+```
+
+```{r}
+trainData <- june2020[trainRowIndex,]
+testData <- june2020[-trainRowIndex,]
+```
+
+### Regression Tree
+
+```{r}
+trainTdDistX <- trainData[,-5]
+trainTDistY <- trainData$trip_distance
+```
+
+```{r}
+testTDistX <- testData[,-5]
+testDistY <- testData$trip_distance
+```
+
+```{r}
+tripDistData <- cbind(trainTdDistX,trainTDistY)
+```
+
+```{r}
+dist.regTree <- tree(trainTDistY~.,data = tripDistData)
+```
+
+```{r}
+summary(dist.regTree)
+```
+
+```{r}
+plot(dist.regTree)
+text(dist.regTree,pretty=0)
+```
+```{r}
+dist.regTreePred <- predict(dist.regTree,testTDistX)
+```
+```{r}
+treePred <- data.frame(cbind(actual=testDistY, predicted=dist.regTreePred))
+```
+
+```{r}
+amt.regTreeAcc <- cor(treePred)
+amt.regTreeAcc
+```
+From this we are able to garner an accuracy prediction score of 90.1% using a regression tree to predict the trip distance.
+
+### Clustering - KMeans
+```{r}
+rateCluster <- subset(june2020,select = c(RatecodeID,PULocationID,DOLocationID))
+```
+
+
+
+
+```{r}
+rateKM <- kmeans(rateCluster,5)
+```
+A good clustering, will have a lower value of withinss and higher value of betweenss which depends on the number of clusters ‘k’ chosen initially
+```{r}
+str(rateKM)
+```
+
+```{r}
+rateClusterDf <- data.frame(rateCluster, as.factor(rateKM$cluster))
+```
+
+
+```{r}
+ggplot(rateClusterDf, aes(x=PULocationID, y=DOLocationID)) + geom_point(mapping = aes(color=as.factor(rateKM$cluster)))+labs(color = "RateCodeID(cluster)") +ggtitle("K-Means Clustering of Pickup and Drop Off Locations")  
+```
+### Classification - Naive Bayes
+```{r}
+x_VendorTrain <- trainData[,-1]
+y_VendorTrain <- as.factor(trainData$VendorID)
+```
+
+```{r}
+x_VendorTest <- testData[,-1]
+y_VendorTest <- as.factor(testData$VendorID)
+```
+
+```{r}
+vendorClassData <- cbind(x_VendorTrain,y_VendorTrain)
+```
+
+
+```{r}
+vendorClass <- naiveBayes(y_VendorTrain~.,data = vendorClassData)
+```
+
+```{r}
+summary(vendorClass)
+```
+
+```{r}
+vendorPred <- predict(vendorClass,x_VendorTest)
+```
+
+```{r}
+confusionMatrix(y_VendorTest,vendorPred)
+```
+
+### Linear Regression
+Create our Train & 
+```{r}
+trainAmtX <- trainData[,-17]
+trainAmtY <- trainData$total_amount
+```
+Test Data
+```{r}
+testAmtX <- testData[,-17]
+testAmtY <- testData$total_amount
+```
+
+```{r}
+testAmt <- cbind(testAmtX,testAmtY)
+```
+
+```{r}
+testAmt<- subset(testAmt,testAmt$pickup_day != 31, drop = T)
+```
+
+```{r}
+testAmtX <- testAmt[,-25]
+testAmtY <- testAmt$testAmtY
+```
+
+```{r}
+totAmtData <- cbind(trainAmtX,trainAmtY)
+```
+
+Fit the Linear Model
+```{r}
+lm.fit <- lm(trainAmtY~.,data = totAmtData)
+```
+
+```{r}
+summary(lm.fit)
+```
+
+Predict on the linear Model
+```{r warning=FALSE}
+lm.pred <- predict(lm.fit,testAmtX)
+```
+
+```{r}
+actuals_preds <- data.frame(cbind(actuals=testAmtY, predicted=lm.pred))
+```
+
+Create a confusion matrix showing model accuracy
+```{r}
+correlation_accuracy <- cor(actuals_preds)
+correlation_accuracy
+```
+
+```{r}
+head(actuals_preds)
+```
+Print the RMSE, the closer to 0 the better
+```{r}
+RMSE(lm.pred,testAmtY)
+```
+Print MAE, the closer to 0 the better
+```{r}
+MAE(lm.pred,testAmtY)
+```
+Plot out linear model
+```{r warning=FALSE}
+ggplot(actuals_preds,aes(actuals_preds$predicted, actuals_preds$actual)) +
+      geom_point(color = "darkred", alpha = 0.5) + 
+      geom_smooth(method=lm)+ ggtitle('Linear Regression ') +
+      ggtitle("Linear Regression: Prediction vs Test Data") +
+      xlab("Predecited Total Amount") +
+      ylab("Observed Total Amount")
+```
