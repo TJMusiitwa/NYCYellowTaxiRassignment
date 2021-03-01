@@ -159,11 +159,7 @@ june2020$payment_type <- mapvalues(payment_type, from = c("1", "2", "3","4"), to
 june2020$VendorID <- mapvalues(VendorID, from = c("1", "2"), to = c("Creative Mobile Technologies", "VeriFone Inc"))
 ```
 
-```{r}
-#june2020$RatecodeID <- mapvalues(RatecodeID, from = c("1", "2", "3","4","5"), to = c("Standard Rate", "JFK","Newark","Nassau or Westchester","Negotiated fare"))
-```
-
-We proceed to extract data relating to day,month and day of the week from the datetime columns
+We proceed to extract data relating to day and day of the week from the datetime columns
 ```{r}
 june2020$pickup_day <- factor(day(tpep_pickup_datetime))
 
@@ -173,12 +169,13 @@ june2020$dropoff_day <- factor(day(tpep_dropoff_datetime))
 
 june2020$dropoff_dayofweek <- factor(wday(tpep_dropoff_datetime, label = TRUE))
 ```
-
+Extract the pickup and dropoff hours
 ```{r}
 june2020$pickup_hour <- factor(hour(tpep_pickup_datetime))
 june2020$dropoff_hour <- factor(hour(tpep_dropoff_datetime))
 ```
 
+Extract the ride duration in seconds
 ```{r}
 june2020$ride_duration <- as.numeric(june2020$tpep_dropoff_datetime-june2020$tpep_pickup_datetime)
 ```
@@ -203,7 +200,7 @@ summary(june2020$ride_duration)
 ```
 ```{r}
 ggplotly(ggplot(june2020,aes(ride_duration))+
-geom_density(stat='count'))
+geom_density(stat='count')+ggtitle("A density plot showing the ride duration span"))
 ```
 # Exploratory Data Analysis
 
@@ -213,17 +210,17 @@ ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x= passenger_count), f
 
 ```{r}
 ggplotly(ggplot(data = june2020) + 
-  geom_bar(mapping = aes(x = VendorID),fill= c("orange", "red")) + ylab("Trip count"))
+  geom_bar(mapping = aes(x = VendorID),fill= c("orange", "red")) + ylab("Trip count") + ggtitle("A graph showing the distinct VectorIDs"))
 ```
 
 ```{r}
 ggplotly(ggplot(data = june2020) + 
-  geom_bar(mapping = aes(x = payment_type, fill=payment_type))+ ylab("Trip count"))
+  geom_bar(mapping = aes(x = payment_type, fill=payment_type))+ ylab("Trip count")+ggtitle("A graph showing the distinct payment types"))
 ```
 
 ```{r}
 ggplotly(ggplot(data = june2020) + 
-  geom_bar(mapping = aes(x = RatecodeID, fill=RatecodeID)) + ylab("Trip count"), tooltip = c("y", "x")+ theme(axis.text.x = element_text(angle = 45)))
+  geom_bar(mapping = aes(x = RatecodeID, fill=RatecodeID)) + ylab("Trip count")+ggtitle("A graph displaying the distinct RateCode IDs"))
 ```
 
 ```{r paged.print=TRUE}
@@ -238,35 +235,25 @@ ggplotly(ggplot(data = june2020) + geom_bar(mapping = aes(x=dropoff_hour, fill=d
 
 
 ```{r}
-ggplotly(ggplot(data=june2020, aes(x=pickup_hour, fill=payment_type)) + geom_bar())
+ggplotly(ggplot(data=june2020, aes(x=pickup_hour, fill=payment_type)) + geom_bar()+ggtitle("A graph showing the distribution of payment types with the pickup hour"))
 ```
-
-```{r}
-ggplot(june2020, aes(x = pickup_hour, y = total_amount)) +
-  geom_boxplot() 
-```
-
 ```{r}
 ggplot(june2020,aes(trip_distance))+
 geom_density(stat='count')+
-xlim(0,30)+ylim(0,1000)
+xlim(0,30)+ylim(0,1000)+ggtitle("A density plot of the trip distance")
 ```
 
 ```{r}
 ggplot(june2020,aes(total_amount))+
 geom_density(stat='count')+
-xlim(0,150)
+ggtitle("A density plot of the total amount")
 ```
 
 ```{r}
-ggplot(june2020, aes(x=trip_distance, y=total_amount))+geom_point()+ geom_smooth(method = lm)
+ggplot(june2020, aes(x=trip_distance, y=total_amount))+geom_point()+ geom_smooth(method = lm)+ggtitle("A linear plot showung the relationship between trip distance and total amount")
 ```
 
 # Model Building
-
-For the purpose of supervised learning, we shall look to predict the total_amount taxi fare based on the set of predictors.
-In order to better predict the total values, we shall be eliminating the negative values
-
 First we shall split the data into training and test datasets
 ```{r}
 trainRowIndex <- sample(1:nrow(june2020), 0.7*nrow(june2020))
@@ -278,7 +265,7 @@ testData <- june2020[-trainRowIndex,]
 ```
 
 ### Regression Tree
-
+For the purpose of the regression tree,  we shall look to predict the trip distance based on the set of predictors.
 ```{r}
 trainTdDistX <- trainData[,-5]
 trainTDistY <- trainData$trip_distance
@@ -316,16 +303,16 @@ treePred <- data.frame(cbind(actual=testDistY, predicted=dist.regTreePred))
 amt.regTreeAcc <- cor(treePred)
 amt.regTreeAcc
 ```
-From this we are able to garner an accuracy prediction score of 90.1% using a regression tree to predict the trip distance.
+From this we are able to garner an accuracy prediction score of 90.12% using a regression tree to predict the trip distance.
 
 ### Clustering - KMeans
+The KMeans Clustering will investigate clustering the location IDs and the RateCodeIDs.
+The data is subset for the purposes of clustering
 ```{r}
 rateCluster <- subset(june2020,select = c(RatecodeID,PULocationID,DOLocationID))
 ```
 
-
-
-
+The choice for the 5 centroids is to align with the 5 RateCodeIDs which allow us to identify the 5 boroughs of New York City
 ```{r}
 rateKM <- kmeans(rateCluster,5)
 ```
@@ -343,6 +330,7 @@ rateClusterDf <- data.frame(rateCluster, as.factor(rateKM$cluster))
 ggplot(rateClusterDf, aes(x=PULocationID, y=DOLocationID)) + geom_point(mapping = aes(color=as.factor(rateKM$cluster)))+labs(color = "RateCodeID(cluster)") +ggtitle("K-Means Clustering of Pickup and Drop Off Locations")  
 ```
 ### Classification - Naive Bayes
+The Naive Bayes classifier will be interacting with the vendorIDs for classification.
 ```{r}
 x_VendorTrain <- trainData[,-1]
 y_VendorTrain <- as.factor(trainData$VendorID)
@@ -375,12 +363,14 @@ confusionMatrix(y_VendorTest,vendorPred)
 ```
 
 ### Linear Regression
-Create our Train & 
+For the purpose of supervised learning, we shall look to predict the total_amount taxi fare based on the set of predictors.
+
+Create our Train & Test Data
 ```{r}
 trainAmtX <- trainData[,-17]
 trainAmtY <- trainData$total_amount
 ```
-Test Data
+
 ```{r}
 testAmtX <- testData[,-17]
 testAmtY <- testData$total_amount
@@ -426,7 +416,9 @@ Create a confusion matrix showing model accuracy
 correlation_accuracy <- cor(actuals_preds)
 correlation_accuracy
 ```
+This returns an accuracy at 99.97%
 
+We can be able to view the head of the actual_predicted data frame to see how similar the values are.
 ```{r}
 head(actuals_preds)
 ```
